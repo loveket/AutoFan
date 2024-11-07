@@ -20,6 +20,8 @@ float tempGet=0.0;
 //定时轮询
 unsigned long previousMillis = 0;
 unsigned long interval = 10000;
+unsigned long disconnPreviousMillis = 0;
+bool IsAutoFan=false;
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
@@ -51,19 +53,32 @@ void initWifi(){
   Serial.print("IP address:\t");
   Serial.println(WiFi.localIP());           // 通过串口监视器输出ESP8266-NodeMCU的IP
   // 设置当网络断开连接的时候自动重连
-  WiFi.setAutoReconnect(true);
-  WiFi.persistent(true);
+//  WiFi.setAutoReconnect(true);
+//  WiFi.persistent(true);
 }
 void initWebServer(){
   //启动http服务
   esp8266_server.begin();                           
   esp8266_server.on("/off", handleFanOff); 
-  esp8266_server.on("/on",  handleFanOn); 
+  esp8266_server.on("/on",  handleFanOn);
+  esp8266_server.on("/auto",  handleAutoFan);
   esp8266_server.onNotFound(handleNotFound);
   Serial.println("HTTP esp8266_server started");//  告知用户ESP8266网络服务功能已经启动
 }
 void initDht(){
   dht.begin();
+}
+void handleAutoFan(){
+  if (esp8266_server.hasArg("on")&&esp8266_server.arg("on") == "true") {
+    IsAutoFan=true;
+    esp8266_server.send(200, "text/plain", "智能监测开启");
+  }else if(esp8266_server.hasArg("off")&&esp8266_server.arg("off") == "false"){
+    IsAutoFan=false;
+    digitalWrite(FanIO,LOW);
+    esp8266_server.send(200, "text/plain", "智能监测关闭");
+  }else{
+    esp8266_server.send(200, "text/plain", "无效请求");
+    }
 }
 void handleFanOff(){
   if(!FanStatus){
@@ -91,6 +106,9 @@ void handleNotFound(){                                              // 当浏览
   esp8266_server.send(404, "text/plain", "404: Not found");         // NodeMCU将调用此函数。
 }
 void GetTempAndWet(){
+  if(!IsAutoFan){
+    return;
+   }
   //每隔10s读取
   unsigned long currentMillis = millis();
   if(currentMillis - previousMillis >=interval){
@@ -112,9 +130,22 @@ void GetTempAndWet(){
     
    }
  }
+void DisConnCkeck(){
+  unsigned long currentMillis = millis();
+  if ((WiFi.status() != WL_CONNECTED) && (currentMillis - disconnPreviousMillis >=interval)) {
+    Serial.print(millis());
+    Serial.println("Reconnecting to WiFi...");
+    WiFi.disconnect();
+    WiFi.begin(ssid, password);
+    Serial.println(WiFi.localIP());
+    Serial.println(WiFi.RSSI());
+    disconnPreviousMillis = currentMillis;
+    }
+  }
 void loop() {
   //Serial.println(digitalRead(FanIO));
   esp8266_server.handleClient();
   //获取温湿度数据
   GetTempAndWet();
+  DisConnCkeck();
 }
